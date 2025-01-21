@@ -18,7 +18,7 @@ class BasketballShotCollector:
         self.start_time = None
         
         # OpenPose 초기화
-        self.datum, se채mplf.opWrapper = self.initialize_openpose()
+        self.datum, self.opWrapper = self.initialize_openpose()
         os.makedirs(self.temp_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
         

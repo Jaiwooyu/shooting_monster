@@ -2,10 +2,14 @@ import cv2
 import csv
 import math
 import numpy as np
+import torch
 import mediapipe as mp
 from ultralytics import YOLO
 from norfair import Detection, Tracker, draw_tracked_objects
 from tqdm import tqdm  # tqdm 임포트
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning) #futurewarning 무시
+
 
 # ============================
 # 1) 설정 상수/파라미터
@@ -118,12 +122,14 @@ def main():
     # --------------------------------
     # (A) YOLOv8 모델 로드
     # --------------------------------
-    model = YOLO("yolov8s.pt")
+    model = YOLO("yolov8l.pt")
+    ball_model = YOLO("basketballModel.pt")
+    print("클래스 이름들:", ball_model.names)
     
     # --------------------------------
     # (B) 입력 비디오 & 결과 비디오 설정
     # --------------------------------
-    input_video = "dataset/multi.mp4"
+    input_video = "dataset1/multi2.mov"
     cap = cv2.VideoCapture(input_video)
     if not cap.isOpened():
         print(f"Error opening video: {input_video}")
@@ -134,14 +140,14 @@ def main():
     fps    = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # 전체 프레임 수
 
-    out_path = "dataset/output_mul.mp4"
+    out_path = "dataset1/output_mul.mp4"
     out = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
     print(f"[INFO] Video output: {out_path}")
 
     # --------------------------------
     # (C) CSV 로깅 (플레이어별 데이터)
     # --------------------------------
-    csv_filename = "dataset/basketball_game_data.csv"
+    csv_filename = "dataset1/basketball_game_data.csv"
     with open(csv_filename, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -180,38 +186,45 @@ def main():
         # -------------------------------
         # 1) YOLOv8 추론
         # -------------------------------
-        results = model.predict(
+        person_results = model.predict(
             source=frame,
             conf=MIN_CONF,
             iou=MIN_IOU,
             device=0,
             verbose=False
-        )
-        detections = results[0]
-        
+        )[0]
+
+        ball_results = ball_model.predict(
+            source=frame,
+            conf=MIN_CONF,
+            iou=MIN_IOU,
+            device=0,
+            verbose=False
+        )[0]
+
         person_detections = []
         ball_detections   = []
 
-        if detections.boxes is not None:
-            for box in detections.boxes:
-                cls_id = int(box.cls[0].item())
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-
-                # (a) person
-                if cls_id == 0: 
+        if person_results.boxes is not None:
+            for box in person_results.boxes:
+                if int(box.cls[0].item()) == 0:  # person class
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
                     cx, cy = get_bbox_center([x1, y1, x2, y2])
                     person_detections.append(
                         Detection(points=np.array([[cx, cy]]),
-                                  data={'bbox':[x1, y1, x2, y2]})
-                    )
-                # (b) sports ball
-                elif cls_id == 32:
-                    cx, cy = get_bbox_center([x1, y1, x2, y2])
-                    ball_detections.append(
-                        Detection(points=np.array([[cx, cy]]),
-                                  data={'bbox':[x1, y1, x2, y2]})
+                                data={'bbox':[x1, y1, x2, y2]})
                     )
 
+        if ball_results.boxes is not None:
+            for box in ball_results.boxes:  # person_results.boxes -> ball_results.boxes로 수정
+                # ball 클래스 번호는 학습된 모델에 따라 다를 수 있으므로 
+                # best.pt 모델에서의 ball 클래스 인덱스를 사용해야 합니다
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                cx, cy = get_bbox_center([x1, y1, x2, y2])
+                ball_detections.append(  # person_detections -> ball_detections로 수정
+                    Detection(points=np.array([[cx, cy]]),
+                            data={'bbox':[x1, y1, x2, y2]})
+                )
         # -------------------------------
         # 2) Norfair로 사람/공 각각 추적
         #    -> player_tracker, ball_tracker 업데이트
@@ -219,96 +232,128 @@ def main():
         tracked_players = player_tracker.update(person_detections)
         tracked_balls   = ball_tracker.update(ball_detections)
 
-        # (선택) 시각화를 위해 bounding box, id 표시
-        for trk_obj in tracked_players:
-            pid = trk_obj.global_id
-            cx, cy = trk_obj.estimate[0]
-            if trk_obj.last_detection is not None:
-                x1,y1,x2,y2 = trk_obj.last_detection.data['bbox']
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255,0,0), 2)
-                cv2.putText(frame, f"Player {pid}", (int(x1), int(y1)-10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,0,0), 2)
-        
-        for trk_obj in tracked_balls:
-            bid = trk_obj.global_id
-            if trk_obj.last_detection is not None:
-                x1,y1,x2,y2 = trk_obj.last_detection.data['bbox']
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0,255,255), 2)
-                cv2.putText(frame, f"Ball {bid}", (int(x1), int(y1)-10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
+        # tracked_players 처리하는 부분을 찾아서 다음과 같이 수정
 
+        # 공의 위치를 먼저 파악
+        ball_center = None
+        for trk_obj in tracked_balls:
+            if trk_obj.last_detection is not None:
+                x1b,y1b,x2b,y2b = trk_obj.last_detection.data['bbox']
+                ball_center = get_bbox_center([x1b,y1b,x2b,y2b])
+                break  # 첫 번째 공만 사용
+
+        print(f"Frame {frame_idx}: {len(tracked_players)} players, {len(tracked_balls)} balls")
+        print(f"Ball Center: {ball_center}")
+
+        # 볼 시각화 추가
+        for trk_obj in tracked_balls:
+            if trk_obj.last_detection is not None:
+                x1b,y1b,x2b,y2b = trk_obj.last_detection.data['bbox']
+                # 볼의 중심점 계산
+                cx_b, cy_b = get_bbox_center([x1b,y1b,x2b,y2b])
+                # 빨간색 점으로 볼 위치 표시
+                cv2.circle(frame, (int(cx_b), int(cy_b)), 5, (0,0,255), -1)  # -1은 원 내부를 채움
+                # 바운딩 박스도 표시 (선택사항)
+                cv2.rectangle(frame, (int(x1b), int(y1b)), (int(x2b), int(y2b)), (0,0,255), 2)
+                # Ball ID 표시 (선택사항)
+                cv2.putText(frame, f"Ball {trk_obj.id}", (int(x1b), int(y1b)-5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 2)
+
+        # 가장 가까운 플레이어 찾기
+        nearest_player = None
+        min_dist_to_ball = float('inf')
+
+        if ball_center is not None:
+            for trk_obj in tracked_players:
+                if trk_obj.last_detection is not None:
+                    x1p,y1p,x2p,y2p = trk_obj.last_detection.data['bbox']
+                    player_center = get_bbox_center([x1p,y1p,x2p,y2p])
+                    dist = np.hypot(player_center[0] - ball_center[0], 
+                                player_center[1] - ball_center[1])
+                    if dist < min_dist_to_ball:
+                        min_dist_to_ball = dist
+                        nearest_player = trk_obj
+
+        # 시각화는 가장 가까운 플레이어만
+        if nearest_player is not None:
+            pid = nearest_player.global_id
+            cx, cy = nearest_player.estimate[0]
+            if nearest_player.last_detection is not None:
+                x1,y1,x2,y2 = nearest_player.last_detection.data['bbox']
+                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255,0,0), 2)
+                cv2.putText(frame, f"Nearest Player {pid}", (int(x1), int(y1)-10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,0,0), 2)
         # -------------------------------
         # 3) "공을 들고 있는/드리블 중인" 플레이어 식별
         # -------------------------------
         player_pose_data = {}  
         row_to_save = []
         
-        for trk_obj in tracked_players:
-            pid = trk_obj.global_id
-            if trk_obj.last_detection is None:
-                continue
-            x1p, y1p, x2p, y2p = trk_obj.last_detection.data['bbox']
-            x1p = max(0, int(x1p)); y1p = max(0, int(y1p))
-            x2p = min(width,  int(x2p)); y2p = min(height, int(y2p))
-            if (x2p - x1p < 10) or (y2p - y1p < 10):
-                continue
+        # 가장 가까운 플레이어만 포즈 분석
+        if nearest_player is not None:
+            pid = nearest_player.global_id
+            if nearest_player.last_detection is not None:
+                x1p, y1p, x2p, y2p = nearest_player.last_detection.data['bbox']
+                x1p = max(0, int(x1p)); y1p = max(0, int(y1p))
+                x2p = min(width, int(x2p)); y2p = min(height, int(y2p))
+                if not ((x2p - x1p < 10) or (y2p - y1p < 10)):
+                    person_roi = frame_rgb[y1p:y2p, x1p:x2p]
+                    results_pose = pose_detector.process(person_roi)
 
-            person_roi = frame_rgb[y1p:y2p, x1p:x2p]
-            results_pose = pose_detector.process(person_roi)
+                    angle_arm = 0.0
+                    angle_leg = 0.0
+                    shot_score = 0.0
+                    landmarks_px = {}
 
-            angle_arm = 0.0
-            angle_leg = 0.0
-            shot_score = 0.0
-            landmarks_px = {}
+                    if results_pose.pose_landmarks:
+                        hR, wR = person_roi.shape[:2]
+                        for idx, lm in enumerate(results_pose.pose_landmarks.landmark):
+                            cx = int(lm.x * wR) + x1p
+                            cy = int(lm.y * hR) + y1p
+                            landmarks_px[idx] = (cx, cy)
+                        
+                        r_shoulder = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_SHOULDER.value)
+                        r_elbow = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_ELBOW.value)
+                        r_wrist = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_WRIST.value)
+                        r_hip = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_HIP.value)
+                        r_knee = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_KNEE.value)
+                        r_ankle = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_ANKLE.value)
 
-            if results_pose.pose_landmarks:
-                hR, wR = person_roi.shape[:2]
-                for idx, lm in enumerate(results_pose.pose_landmarks.landmark):
-                    cx = int(lm.x * wR) + x1p
-                    cy = int(lm.y * hR) + y1p
-                    landmarks_px[idx] = (cx, cy)
-                
-                r_shoulder = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_SHOULDER.value)
-                r_elbow    = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_ELBOW.value)
-                r_wrist    = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_WRIST.value)
-                r_hip      = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_HIP.value)
-                r_knee     = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_KNEE.value)
-                r_ankle    = landmarks_px.get(mp_pose.PoseLandmark.RIGHT_ANKLE.value)
+                        if (r_shoulder and r_elbow and r_wrist):
+                            angle_arm = calculate_angle(r_shoulder, r_elbow, r_wrist)
+                        if (r_hip and r_knee and r_ankle):
+                            angle_leg = calculate_angle(r_hip, r_knee, r_ankle)
+                        
+                        shot_score = score_shot_form(landmarks_px)
 
-                if (r_shoulder and r_elbow and r_wrist):
-                    angle_arm = calculate_angle(r_shoulder, r_elbow, r_wrist)
-                if (r_hip and r_knee and r_ankle):
-                    angle_leg = calculate_angle(r_hip, r_knee, r_ankle)
-                
-                shot_score = score_shot_form(landmarks_px)
+                        # 포즈 시각화
+                        for conn in mp_pose.POSE_CONNECTIONS:
+                            start, end = conn
+                            if (start in landmarks_px) and (end in landmarks_px):
+                                cv2.line(frame, landmarks_px[start], landmarks_px[end], (0,255,0), 2)
+                        for idx_lm in landmarks_px:
+                            cv2.circle(frame, landmarks_px[idx_lm], 4, (0,0,255), -1)
+                        
+                        if r_elbow:
+                            cv2.putText(frame, f"Arm:{angle_arm:.1f}",
+                                      (r_elbow[0]+10, r_elbow[1]),
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
+                        if r_knee:
+                            cv2.putText(frame, f"Leg:{angle_leg:.1f}",
+                                      (r_knee[0]+10, r_knee[1]),
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
+                        if r_shoulder:
+                            cv2.putText(frame, f"Score:{shot_score:.1f}",
+                                      (r_shoulder[0]+20, r_shoulder[1]-20),
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
 
-                for conn in mp_pose.POSE_CONNECTIONS:
-                    start, end = conn
-                    if (start in landmarks_px) and (end in landmarks_px):
-                        cv2.line(frame, landmarks_px[start], landmarks_px[end], (0,255,0), 2)
-                for idx_lm in landmarks_px:
-                    cv2.circle(frame, landmarks_px[idx_lm], 4, (0,0,255), -1)
-                
-                if r_elbow:
-                    cv2.putText(frame, f"Arm:{angle_arm:.1f}",
-                                (r_elbow[0]+10, r_elbow[1]),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
-                if r_knee:
-                    cv2.putText(frame, f"Leg:{angle_leg:.1f}",
-                                (r_knee[0]+10, r_knee[1]),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
-                if r_shoulder:
-                    cv2.putText(frame, f"Score:{shot_score:.1f}",
-                                (r_shoulder[0]+20, r_shoulder[1]-20),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
-
-            player_pose_data[pid] = {
-                "landmarks": landmarks_px,
-                "bbox": (x1p, y1p, x2p, y2p),
-                "angle_arm": angle_arm,
-                "angle_leg": angle_leg,
-                "shot_score": shot_score
-            }
+                        player_pose_data[pid] = {
+                            "landmarks": landmarks_px,
+                            "bbox": (x1p, y1p, x2p, y2p),
+                            "angle_arm": angle_arm,
+                            "angle_leg": angle_leg,
+                            "shot_score": shot_score
+                        }
 
         ball_positions = {}
         for trk_obj in tracked_balls:
@@ -330,13 +375,13 @@ def main():
                 lms = pdata["landmarks"]
                 if not lms:
                     continue
-                left_wrist  = lms.get(mp_pose.PoseLandmark.LEFT_WRIST.value)
+                left_wrist = lms.get(mp_pose.PoseLandmark.LEFT_WRIST.value)
                 right_wrist = lms.get(mp_pose.PoseLandmark.RIGHT_WRIST.value)
-                left_ankle  = lms.get(mp_pose.PoseLandmark.LEFT_ANKLE.value)
+                left_ankle = lms.get(mp_pose.PoseLandmark.LEFT_ANKLE.value)
                 right_ankle = lms.get(mp_pose.PoseLandmark.RIGHT_ANKLE.value)
 
                 cand_points = []
-                if left_wrist:  cand_points.append(("left", left_wrist))
+                if left_wrist: cand_points.append(("left", left_wrist))
                 if right_wrist: cand_points.append(("right", right_wrist))
                 for hand_id, (hx, hy) in cand_points:
                     dist = np.hypot(hx - cx_b, hy - cy_b)
@@ -375,11 +420,11 @@ def main():
 
             if ball_state != "none" and nearest_pid is not None:
                 cv2.putText(frame, ball_state.upper(), (int(cx_b)+10, int(cy_b)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
                 head = player_pose_data[nearest_pid]["landmarks"].get(mp_pose.PoseLandmark.NOSE.value)
                 if head:
                     cv2.putText(frame, ball_state.upper(), (head[0], head[1]-30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
 
                 row_to_save.append([
                     frame_idx, 
@@ -410,18 +455,14 @@ def main():
 
         out.write(frame)
         
-        progress_bar.update(1)  # tqdm 진행률 업데이트
+        progress_bar.update(1)
 
-    progress_bar.close()  # 로딩바 종료
+    progress_bar.close()
     cap.release()
     out.release()
-    # cv2.destroyAllWindows()
 
     print(f"[INFO] Done. Output saved: {out_path}")
     print(f"[INFO] CSV saved: {csv_filename}")
 
-# ============================
-# 6) 실행
-# ============================
 if __name__ == "__main__":
     main()

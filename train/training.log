@@ -1,0 +1,106 @@
+2025-01-21 06:46:49,804 - INFO - Starting pre-training with elite players dataset...
+2025-01-21 06:46:51,536 - INFO - Found 60 videos in elite_players_dataset
+2025-01-21 06:46:53,697 - ERROR - Error in main: DataLoader worker (pid(s) 253793) exited unexpectedly
+2025-01-21 06:48:24,279 - INFO - Starting pre-training with elite players dataset...
+2025-01-21 06:48:24,279 - INFO - Found 60 videos in elite_players_dataset
+2025-01-21 06:48:24,280 - ERROR - Error in main: object of type 'ShootingDataset' has no len()
+2025-01-21 06:48:54,309 - INFO - Starting pre-training with elite players dataset...
+2025-01-21 06:48:54,310 - INFO - Found 60 videos in elite_players_dataset
+2025-01-21 06:50:07,982 - INFO - Epoch 1, Loss: 0.339545
+2025-01-21 06:50:52,640 - INFO - Starting pre-training with elite players dataset...
+2025-01-21 06:50:52,642 - INFO - Found 60 videos in elite_players_dataset
+2025-01-21 06:52:07,119 - INFO - Epoch 1, Loss: 0.336878
+2025-01-21 06:53:17,105 - INFO - Epoch 2, Loss: 0.205939
+2025-01-21 06:54:27,336 - INFO - Epoch 3, Loss: 0.110421
+2025-01-21 06:55:32,331 - INFO - Starting pre-training with elite players dataset...
+2025-01-21 06:55:32,395 - INFO - Found 60 videos in elite_players_dataset
+2025-01-21 06:55:34,592 - ERROR - Error in main: DataLoader worker (pid(s) 261429) exited unexpectedly
+2025-01-21 06:57:51,760 - INFO - Starting pre-training with elite players dataset...
+2025-01-21 06:57:51,761 - INFO - Found 60 videos in elite_players_dataset
+2025-01-21 09:54:00,972 - INFO - Starting pre-training with elite players dataset...
+2025-01-21 09:54:00,973 - INFO - Found 60 videos in elite_players_dataset
+2025-01-21 09:57:18,787 - INFO - Epoch 1, Loss: 0.058686
+2025-01-21 10:00:30,376 - INFO - Epoch 2, Loss: 0.054369
+2025-01-21 10:03:44,542 - INFO - Epoch 3, Loss: 0.047383
+2025-01-21 10:06:58,521 - INFO - Epoch 4, Loss: 0.037070
+2025-01-21 10:10:14,468 - INFO - Epoch 5, Loss: 0.027828
+2025-01-21 10:13:28,902 - INFO - Epoch 6, Loss: 0.021156
+2025-01-21 10:17:06,222 - INFO - Epoch 7, Loss: 0.017278
+2025-01-21 10:20:53,119 - INFO - Epoch 8, Loss: 0.015095
+2025-01-21 10:24:22,123 - INFO - Epoch 9, Loss: 0.012492
+2025-01-21 10:27:33,148 - INFO - Epoch 10, Loss: 0.011467
+2025-01-21 10:30:46,013 - INFO - Epoch 11, Loss: 0.010223
+2025-01-21 10:34:00,000 - INFO - Epoch 12, Loss: 0.009629
+2025-01-21 10:37:12,739 - INFO - Epoch 13, Loss: 0.009351
+2025-01-21 10:40:27,359 - INFO - Epoch 14, Loss: 0.009196
+2025-01-21 10:43:48,102 - INFO - Epoch 15, Loss: 0.009255
+2025-01-21 10:47:02,357 - INFO - Epoch 16, Loss: 0.009262
+2025-01-21 10:50:15,636 - INFO - Epoch 17, Loss: 0.008915
+2025-01-21 10:53:33,407 - INFO - Epoch 18, Loss: 0.008772
+2025-01-21 10:56:48,842 - INFO - Epoch 19, Loss: 0.008423
+2025-01-21 11:00:01,827 - INFO - Epoch 20, Loss: 0.008327
+2025-01-21 11:03:26,126 - INFO - Epoch 21, Loss: 0.008120
+2025-01-21 11:06:40,089 - INFO - Epoch 22, Loss: 0.008417
+2025-01-21 11:09:56,172 - INFO - Epoch 23, Loss: 0.008236
+2025-01-21 11:13:11,769 - INFO - Epoch 24, Loss: 0.008370
+2025-01-21 11:16:23,706 - INFO - Epoch 25, Loss: 0.007996
+2025-01-21 11:19:39,496 - INFO - Epoch 26, Loss: 0.007957
+2025-01-21 11:22:57,260 - INFO - Epoch 27, Loss: 0.007933
+2025-01-21 11:26:09,955 - INFO - Epoch 28, Loss: 0.008231
+2025-01-21 11:29:22,525 - INFO - Epoch 29, Loss: 0.008000
+2025-01-21 11:32:36,383 - INFO - Epoch 30, Loss: 0.008015
+2025-01-21 11:32:36,390 - INFO - Pre-training completed!
+2025-01-21 11:37:53,901 - ERROR - Video file not found: dataset1/input_video.mp4
+2025-01-21 11:38:46,629 - INFO - Processed 111 frames from video
+2025-01-21 11:38:51,248 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 13:12:21,045 - INFO - Starting pre-training with elite players dataset...
+2025-01-21 13:12:21,048 - INFO - Found 60 videos in elite_players_dataset
+2025-01-21 13:12:40,390 - ERROR - Error processing item 9: not enough values to unpack (expected 3, got 1)
+2025-01-21 13:12:45,962 - ERROR - Error processing item 29: not enough values to unpack (expected 3, got 1)
+2025-01-21 13:12:50,193 - ERROR - Error processing item 10: not enough values to unpack (expected 3, got 1)
+2025-01-21 13:13:49,273 - INFO - Starting pre-training with elite players dataset...
+2025-01-21 13:13:49,274 - INFO - Found 60 videos in elite_players_dataset
+2025-01-21 13:15:37,789 - INFO - Processed 111 frames from video
+2025-01-21 13:15:49,335 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 13:28:25,692 - INFO - Processed 111 frames from video
+2025-01-21 13:29:11,072 - INFO - Processed 111 frames from video
+2025-01-21 13:29:49,086 - INFO - Processed 111 frames from video
+2025-01-21 13:29:52,255 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 13:32:25,612 - INFO - Processed 88 frames from video
+2025-01-21 13:32:28,536 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 13:50:46,283 - INFO - Processed 88 frames from video
+2025-01-21 13:50:49,127 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 13:51:21,654 - INFO - Processed 88 frames from video
+2025-01-21 13:51:24,580 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 13:52:42,531 - INFO - Processed 88 frames from video
+2025-01-21 13:52:45,520 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 13:58:19,447 - INFO - Processed 88 frames from video
+2025-01-21 13:58:22,212 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 13:58:46,618 - INFO - Processed 88 frames from video
+2025-01-21 13:58:49,585 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 13:59:09,317 - INFO - Processed 111 frames from video
+2025-01-21 13:59:12,357 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 13:59:27,540 - INFO - Processed 111 frames from video
+2025-01-21 13:59:30,819 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 15:33:00,759 - INFO - Processed 111 frames from video
+2025-01-21 15:37:14,865 - INFO - Processed 111 frames from video
+2025-01-21 15:37:18,173 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 15:38:30,385 - INFO - Processed 111 frames from video
+2025-01-21 15:38:33,494 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 15:39:45,837 - INFO - Processed 111 frames from video
+2025-01-21 15:39:49,166 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 15:40:35,230 - INFO - Processed 111 frames from video
+2025-01-21 15:40:38,442 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 15:43:51,382 - INFO - Processed 111 frames from video
+2025-01-21 15:43:55,083 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 15:44:56,669 - INFO - Processed 111 frames from video
+2025-01-21 15:44:59,807 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 15:49:38,353 - INFO - Processed 111 frames from video
+2025-01-21 15:49:41,641 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 15:50:47,458 - INFO - Processed 111 frames from video
+2025-01-21 15:50:50,731 - INFO - Animation.save using <class 'matplotlib.animation.PillowWriter'>
+2025-01-21 15:51:01,351 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 16:42:07,130 - INFO - Processed 111 frames from video
+2025-01-21 16:42:10,460 - INFO - Successfully analyzed shooting mechanics
+2025-01-21 16:50:49,799 - INFO - Processed 111 frames from video
+2025-01-21 16:50:53,041 - INFO - Successfully analyzed shooting mechanics
