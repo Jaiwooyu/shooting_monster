@@ -8,6 +8,4 @@
 *.zip
 *.tar
 
-yolov8x.pt
-yolov8l.pt
-yolov8l-pose.pt
+*.pt
