@@ -1,0 +1,19 @@
+# 비디오 파일
+*.mov
+*.mp4
+*.avi
+*.wmv
+*.mkv
+
+*.zip
+*.tar
+ballData.zip
+yolov8x.pt
+
+
+*.pt
+*.pth
+
+.env
+connectwithclient/.env
+connectwithclient/ecosystem.config.js
