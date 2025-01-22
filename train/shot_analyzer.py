@@ -36,31 +36,29 @@ class BasketballShootingAnalyzer:
         )
 
     def extract_pose_features(self, frame):
-        """
-        YOLOv8l을 사용하여 프레임에서 랜드마크 좌표를 추출.
-        """
-        if self.frame_width is None:
-            self.frame_width = frame.shape[1]
-
         results = self.pose_model.predict(frame, imgsz=640, conf=0.4, verbose=False)
         if not results or len(results) == 0:
+            logging.error("No detection results from YOLOv8.")
             return None
 
         res = results[0]
         if not hasattr(res, 'keypoints') or res.keypoints is None:
+            logging.error("No keypoints detected in YOLOv8 results.")
             return None
 
-        # 랜드마크 추출: (num_keypoints, 3) 형식
+        # 랜드마크 디버깅
+        logging.info(f"Detected keypoints: {res.keypoints.shape}")
         keypoints = res.keypoints.cpu().numpy() if torch.cuda.is_available() else res.keypoints.numpy()
-        
-        # 33개의 랜드마크 x (x, y, confidence)로 변환 (z=0 추가)
+
+        # Convert to 132-dimension format
         landmarks = []
         for kp in keypoints:
             x, y, conf = kp
             landmarks.extend([x, y, 0.0, conf])  # z=0.0 추가
 
-        # 132차원 배열 반환
+        logging.info(f"Extracted landmarks: {len(landmarks)}")
         return np.array(landmarks)
+
 
 
     def transform_to_right_handed(self, features):
