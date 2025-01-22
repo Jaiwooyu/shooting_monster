@@ -8,21 +8,20 @@ import os
 from ultralytics import YOLO
 from train_model import ShootingPoseModel  # 모델 클래스 임포트
 
+
 # GPU 사용 가능 여부 확인
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class BasketballShootingAnalyzer:
-    def __init__(self, model_path='best_pretrain_model.pth', handedness='right'):
+    def __init__(self, model_path='pretrained_model.pth', handedness='right'):
+        # handedness: 'right' 또는 'left'
         self.handedness = handedness
         self.frame_width = None  # 첫 번째 프레임에서 설정
 
-        # YOLOv8l 일반 객체 탐지 모델 초기화
+
+        # 사람 탐지를 위한 모델 초기화 (필요시 사용)
         self.pose_model = YOLO('yolov8l.pt')
         self.pose_model.to(device)
-
-        # 사람 탐지를 위한 동일한 모델 사용
-        self.person_model = YOLO('yolov8l.pt')
-        self.person_model.to(device)
 
         self.model = ShootingPoseModel()
         if model_path and os.path.exists(model_path):
@@ -36,9 +35,7 @@ class BasketballShootingAnalyzer:
         )
 
     def extract_pose_features(self, frame):
-        """
-        YOLOv8l을 사용하여 프레임에서 랜드마크 좌표를 추출.
-        """
+        """YOLOv8l-pose를 사용하여 프레임에서 첫 번째 사람에 대한 포즈 특징 추출"""
         if self.frame_width is None:
             self.frame_width = frame.shape[1]
 
@@ -47,41 +44,58 @@ class BasketballShootingAnalyzer:
             return None
 
         res = results[0]
-        if not hasattr(res, 'keypoints') or res.keypoints is None:
+        if res.keypoints is None:
             return None
 
-        # 랜드마크 추출: (num_keypoints, 3) 형식
-        keypoints = res.keypoints.cpu().numpy() if torch.cuda.is_available() else res.keypoints.numpy()
-        
-        # 33개의 랜드마크 x (x, y, confidence)로 변환 (z=0 추가)
+        try:
+            kp = res.keypoints
+            raw = kp.data.cpu().numpy() if torch.cuda.is_available() else kp.data.numpy()
+        except Exception as e:
+            logging.error(f"Error extracting keypoints: {e}")
+            return None
+
+        if raw.ndim == 3:
+            keypoints = raw[0]
+        elif raw.ndim == 2:
+            keypoints = raw
+        else:
+            logging.error(f"Unexpected keypoints shape: {raw.shape}")
+            return None
+
         landmarks = []
-        for kp in keypoints:
-            x, y, conf = kp
-            landmarks.extend([x, y, 0.0, conf])  # z=0.0 추가
+        for (x, y, conf) in keypoints:
+            # handedness에 따른 좌우 반전은 여기서 하지 않고, 전체 데이터 변환 함수에서 처리
+            landmarks.extend([x, y, 0.0, float(conf)])
 
-        # 132차원 배열 반환
+        if len(landmarks) < 132:
+            landmarks.extend([0.0] * (132 - len(landmarks)))
+
         return np.array(landmarks)
-
 
     def transform_to_right_handed(self, features):
         """
-        왼손잡이 사용자의 데이터를 오른손잡이 기준으로 변환.
-        여기서는 바운딩 박스 좌표를 좌우 반전.
+        왼손잡이 사용자의 포즈 데이터를 오른손잡이 기준으로 변환.
+        여기서는 주요 관절 쌍만 좌우 교환.
         """
-        # 일반 객체 탐지에서는 handedness 변환을 위해 바운딩 박스 좌우 반전 수행
         transformed = features.copy()
-        if self.frame_width is None:
-            return transformed
-
-        # 각 프레임에 대해 바운딩 박스 좌표 반전
-        for i in range(transformed.shape[0]):
-            x1, y1, x2, y2 = transformed[i]
-            transformed[i, 0] = self.frame_width - x2
-            transformed[i, 2] = self.frame_width - x1
-            # y1, y2는 세로 좌표로 반전하지 않음
+        # 주요 관절 인덱스 쌍 (왼쪽과 오른쪽 교환)
+        left_right_pairs = [
+            (11, 12), (13, 14), (15, 16),  # 어깨, 팔꿈치, 손목
+            (23, 24), (25, 26), (27, 28)   # 엉덩이, 무릎, 발목
+        ]
+        for left_idx, right_idx in left_right_pairs:
+            left_start = left_idx * 4
+            right_start = right_idx * 4
+            # 각 프레임에 대해 좌우 교환
+            temp = transformed[:, left_start:left_start+4].copy()
+            transformed[:, left_start:left_start+4] = transformed[:, right_start:right_start+4]
+            transformed[:, right_start:right_start+4] = temp
         return transformed
 
     def swap_feedback_labels(self, feedback):
+        """
+        피드백의 관절 라벨을 좌우 반전.
+        """
         swap_map = {
             'right_shoulder': 'left_shoulder',
             'right_elbow': 'left_elbow',
@@ -97,11 +111,13 @@ class BasketballShootingAnalyzer:
             'left_ankle': 'right_ankle'
         }
 
+        # major_differences 라벨 교환
         if 'major_differences' in feedback:
             feedback['major_differences'] = [
                 swap_map.get(joint, joint) for joint in feedback['major_differences']
             ]
 
+        # detailed_analysis 키 교환
         if 'detailed_analysis' in feedback:
             new_detailed = {}
             for joint, analysis in feedback['detailed_analysis'].items():
@@ -110,8 +126,9 @@ class BasketballShootingAnalyzer:
             feedback['detailed_analysis'] = new_detailed
 
         return feedback
-    
+
     def analyze_shooting_mechanics(self, user_sequence):
+        """사용자의 슈팅 메카닉스 분석"""
         features = []
         for frame in user_sequence:
             pose_features = self.extract_pose_features(frame)
@@ -120,47 +137,33 @@ class BasketballShootingAnalyzer:
 
         if not features:
             return None
+        
+        print(features)
 
+        
         features = np.array(features)
 
         # 왼손잡이일 경우 데이터를 오른손잡이 기준으로 변환
         if self.handedness == 'left':
             features = self.transform_to_right_handed(features)
 
-        # 모델 입력을 위한 33 프레임 132차원 벡터로 변환
-        # features shape: (num_frames, 4)
-        required_frames = 33
-        current_frames = features.shape[0]
-
-        # 프레임 수가 33 미만이면 패딩
-        if current_frames < required_frames:
-            pad = np.zeros((required_frames - current_frames, features.shape[1]))
-            features = np.vstack([features, pad])
-        
-        # 처음 33 프레임 선택
-        features = features[:required_frames]
-        
-        # 33개의 4차원 벡터를 132차원 벡터로 평탄화
-        ffeatures = features.flatten()  # shape: (132,)
-
         with torch.no_grad():
-    # features shape 확인 (33, 132)이어야 함)
-            assert features.shape == (33, 132), f"Unexpected features shape: {features.shape}"
-
-            # 배치 차원을 추가하여 (1, 33, 132)로 변환
-            user_tensor = torch.FloatTensor(features).unsqueeze(0).to(device)  # shape: (1, 33, 132)
-            reconstructed = self.model(user_tensor)  # 모델 입력
+            user_tensor = torch.FloatTensor(features).unsqueeze(0).to(device)
+            reconstructed = self.model(user_tensor)
             differences = torch.abs(reconstructed - user_tensor)
             differences = differences.cpu().numpy()
 
         feedback = self.generate_feedback(differences[0])
 
+        # handedness가 left이면 피드백 라벨을 다시 좌우 반전하여 왼손 기준으로 변환
         if self.handedness == 'left' and feedback is not None:
             feedback = self.swap_feedback_labels(feedback)
+
 
         return feedback
 
     def generate_feedback(self, differences):
+        """차이점 분석을 바탕으로 피드백 생성"""
         joint_differences = {}
 
         key_joints = {
@@ -180,7 +183,7 @@ class BasketballShootingAnalyzer:
 
         for joint_name, idx in key_joints.items():
             start_idx = idx * 4
-            joint_diff = np.mean(differences[start_idx:start_idx+3])
+            joint_diff = np.mean(differences[:, start_idx:start_idx+3])
             joint_differences[joint_name] = joint_diff
 
         feedback = {
@@ -201,6 +204,7 @@ class BasketballShootingAnalyzer:
         return feedback
 
     def _generate_joint_feedback(self, joint, difference, threshold):
+        """개별 관절에 대한 구체적 피드백 생성"""
         if difference <= threshold:
             return f"{joint.replace('_', ' ').title()}의 움직임이 프로 선수와 유사합니다."
 
@@ -219,8 +223,9 @@ class BasketballShootingAnalyzer:
 
         return f"{joint.replace('_', ' ').title()}의 움직임에 개선이 필요합니다."
 
-def analyze_video(video_path, model_path='best_pretrain_model.pth'):
-    analyzer = BasketballShootingAnalyzer(model_path, handedness='right')
+def analyze_video(video_path, model_path='pretrained_model.pth'):
+    """비디오 파일 분석"""
+    analyzer = BasketballShootingAnalyzer(model_path, handedness='left')  # 필요시 handedness 설정
 
     if not os.path.exists(video_path):
         logging.error(f"Video file not found: {video_path}")
@@ -259,7 +264,8 @@ def analyze_video(video_path, model_path='best_pretrain_model.pth'):
     return feedback
 
 def main():
-    video_path = "../dataset1/input/input_video.mp4"
+    # 예시: 비디오 분석
+    video_path = "../dataset1/input_video.mp4"  # 분석할 사용자 영상
     feedback = analyze_video(video_path)
 
     if feedback is None:
