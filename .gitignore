@@ -10,3 +10,7 @@
 
 *.pt
 *.pth
+
+.env
+connectwithclient/.env
+connectwithclient/ecosystem.config.js

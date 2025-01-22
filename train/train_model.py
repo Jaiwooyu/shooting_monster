@@ -144,7 +144,7 @@ class ShootingDataset(Dataset):
     def process_frames(self, frames):
         features = []
         # YOLOv8l-pose 모델 초기화
-        pose_model = YOLO('yolov8l-pose.pt')
+        pose_model = YOLO('yolov8l.pt')
         pose_model.to(device)
         ball_model = self.ball_model
 
@@ -366,7 +366,7 @@ def main(pretrain=True, finetune=True):
             pretrain_dataset = ShootingDataset("elite_players_dataset", ball_model, is_elite_dataset=True)
             pretrain_loader = DataLoader(
                 pretrain_dataset,
-                batch_size=16,
+                batch_size=64,
                 shuffle=True,
                 num_workers=0,            # 멀티프로세싱 비활성화
                 pin_memory=torch.cuda.is_available()
@@ -377,8 +377,8 @@ def main(pretrain=True, finetune=True):
             pretrain_model, pretrain_history = train_model(
                 model, 
                 pretrain_loader,
-                epochs=30,
-                learning_rate=0.001,
+                epochs=100,
+                learning_rate=0.0005,
                 is_pretrain=True
             )
             

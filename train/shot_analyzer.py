@@ -12,6 +12,11 @@ from train_model import ShootingPoseModel  # 모델 클래스 임포트
 # GPU 사용 가능 여부 확인
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+# docker run --gpus all -it --network host \
+#   -v /home/user/videos:/VIBE/input_videos \
+#   -v /home/user/outputs:/VIBE/output_fbx \
+#   vibe_env
+
 class BasketballShootingAnalyzer:
     def __init__(self, model_path='pretrained_model.pth', handedness='right'):
         # handedness: 'right' 또는 'left'
