@@ -124,7 +124,7 @@ def overlay_and_save_video(user_sequence, reconstructed_landmarks, original_land
             # 원본 랜드마크: 빨간색
             draw_landmarks_manual(frame, orig, (0, 0, 255))
             # 재구성 랜드마크: 파란색
-            draw_landmarks_manual(frame, recon, (255, 0, 0))
+            # draw_landmarks_manual(frame, recon, (255, 0, 0))
             # 혼합 랜드마크: 녹색
             draw_landmarks_manual(frame, combined_landmarks, (0, 255, 0))
             
