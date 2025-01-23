@@ -1,6 +1,9 @@
 // ml_computer/firebaseAdmin.js
 const admin = require('firebase-admin');
 const { getFirestore } = require('firebase-admin/firestore');
+const dotenv = require('dotenv');
+
+dotenv.config();
 
 admin.initializeApp({
     credential: admin.credential.cert({

@@ -1,85 +1,147 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import mediapipe as mp
 import cv2
 import logging
 from pathlib import Path
 import os
 from ultralytics import YOLO
-from train_model import ShootingPoseModel  # 모델 클래스 임포트
+from train_model import ShootingPoseModel
 
 # GPU 사용 가능 여부 확인
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Using device: {device}")
+
+def overlay_and_save_video(user_sequence, reconstructed_landmarks, original_landmarks, output_path, fps, mix_ratio=0.1):
+    """
+    비디오 시퀀스에 원본, 재구성, 혼합 랜드마크를 각각 다른 색상으로 오버레이하고 저장
+    
+    Args:
+        user_sequence: 원본 비디오 프레임 시퀀스
+        reconstructed_landmarks: 모델이 재구성한 랜드마크 데이터 
+        original_landmarks: 원본 랜드마크 데이터
+        output_path: 결과 비디오 저장 경로
+        fps: 비디오의 초당 프레임 수
+        mix_ratio: 재구성 랜드마크가 차지하는 비율 (예: 0.1 = 10%)
+    """
+    print("\nStarting video overlay process...")
+    
+    mp_pose = mp.solutions.pose
+
+    def draw_landmarks_manual(image, landmarks_array, color):
+        landmarks = {}
+        for idx in range(33):  # MediaPipe는 33개의 랜드마크 사용
+            start_idx = idx * 4
+            x = landmarks_array[start_idx]
+            y = landmarks_array[start_idx + 1]
+            visibility = landmarks_array[start_idx + 3]
+            
+            # 좌표가 0~1 사이인지 판단하여 변환
+            if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
+                pixel_x = int(x * image.shape[1])
+                pixel_y = int(y * image.shape[0])
+            else:
+                pixel_x = int(x)
+                pixel_y = int(y)
+            
+            pixel_x = max(0, min(pixel_x, image.shape[1]-1))
+            pixel_y = max(0, min(pixel_y, image.shape[0]-1))
+            
+            if visibility > 0.5:
+                landmarks[idx] = (pixel_x, pixel_y)
+        
+        # 랜드마크 연결 선과 점 그리기
+        for connection in mp_pose.POSE_CONNECTIONS:
+            start_idx, end_idx = connection
+            if (start_idx in landmarks) and (end_idx in landmarks):
+                cv2.line(image, landmarks[start_idx], landmarks[end_idx], color, 2)
+        for point in landmarks.values():
+            cv2.circle(image, point, 4, color, -1)
+
+    if len(user_sequence) == 0:
+        print("Error: Empty video sequence")
+        return
+        
+    height, width = user_sequence[0].shape[:2]
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    
+    print(f"Processing {len(user_sequence)} frames...")
+
+    for frame_idx in range(len(user_sequence)):
+        frame = user_sequence[frame_idx].copy()
+        
+        if (frame_idx < len(original_landmarks) 
+            and frame_idx < len(reconstructed_landmarks)):
+            orig = original_landmarks[frame_idx]
+            recon = reconstructed_landmarks[frame_idx]
+            combined_landmarks = (1 - mix_ratio) * orig + mix_ratio * recon
+            
+            # 원본 랜드마크: 빨간색
+            draw_landmarks_manual(frame, orig, (0, 0, 255))
+            # 재구성 랜드마크: 파란색
+            draw_landmarks_manual(frame, recon, (255, 0, 0))
+            # 혼합 랜드마크: 녹색
+            draw_landmarks_manual(frame, combined_landmarks, (0, 255, 0))
+            
+            cv2.putText(frame, f'Frame: {frame_idx}', (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(frame, 'Red: Original, Blue: Reconstructed, Green: Mixed', (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        out.write(frame)
+    
+    out.release()
+    print(f"Video saved to: {output_path}")
+
+
 
 class BasketballShootingAnalyzer:
-    def __init__(self, model_path='best_pretrain_model.pth', handedness='right'):
+    def __init__(self, model_path='best_pretrain_model_train_2.pth', handedness='right'):
         self.handedness = handedness
-        self.frame_width = None  # 첫 번째 프레임에서 설정
-
-        # YOLOv8l 일반 객체 탐지 모델 초기화
-        self.pose_model = YOLO('yolov8l.pt')
-        self.pose_model.to(device)
-
-        # 사람 탐지를 위한 동일한 모델 사용
-        self.person_model = YOLO('yolov8l.pt')
-        self.person_model.to(device)
-
+        self.frames_per_shot = 30
+        
+        # YOLO 모델 초기화
+        self.ball_model = YOLO('best_2.pt')
+        self.ball_model.to(device)
+        
+        # 포즈 추정 모델 초기화
         self.model = ShootingPoseModel()
         if model_path and os.path.exists(model_path):
             self.model.load_state_dict(torch.load(model_path, map_location=device))
         self.model = self.model.to(device)
         self.model.eval()
 
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
-        )
-
-    def extract_pose_features(self, frame):
-        results = self.pose_model.predict(frame, imgsz=640, conf=0.4, verbose=False)
-        if not results or len(results) == 0:
-            logging.error("No detection results from YOLOv8.")
-            return None
-
-        res = results[0]
-        if not hasattr(res, 'keypoints') or res.keypoints is None:
-            logging.error("No keypoints detected in YOLOv8 results.")
-            return None
-
-        # 랜드마크 디버깅
-        logging.info(f"Detected keypoints: {res.keypoints.shape}")
-        keypoints = res.keypoints.cpu().numpy() if torch.cuda.is_available() else res.keypoints.numpy()
-
-        # Convert to 132-dimension format
-        landmarks = []
-        for kp in keypoints:
-            x, y, conf = kp
-            landmarks.extend([x, y, 0.0, conf])  # z=0.0 추가
-
-        logging.info(f"Extracted landmarks: {len(landmarks)}")
-        return np.array(landmarks)
-
-
 
     def transform_to_right_handed(self, features):
         """
-        왼손잡이 사용자의 데이터를 오른손잡이 기준으로 변환.
-        여기서는 바운딩 박스 좌표를 좌우 반전.
+        왼손잡이 사용자의 포즈 데이터를 오른손잡이 기준으로 변환.
+        여기서는 주요 관절 쌍만 좌우 교환.
         """
-        # 일반 객체 탐지에서는 handedness 변환을 위해 바운딩 박스 좌우 반전 수행
         transformed = features.copy()
-        if self.frame_width is None:
-            return transformed
-
-        # 각 프레임에 대해 바운딩 박스 좌표 반전
-        for i in range(transformed.shape[0]):
-            x1, y1, x2, y2 = transformed[i]
-            transformed[i, 0] = self.frame_width - x2
-            transformed[i, 2] = self.frame_width - x1
-            # y1, y2는 세로 좌표로 반전하지 않음
+        # 주요 관절 인덱스 쌍 (왼쪽과 오른쪽 교환)
+        left_right_pairs = [
+            (11, 12),  # 어깨
+            (13, 14),  # 팔꿈치
+            (15, 16),  # 손목
+            (23, 24),  # 엉덩이
+            (25, 26),  # 무릎
+            (27, 28)   # 발목
+        ]
+        
+        for left_idx, right_idx in left_right_pairs:
+            left_start = left_idx * 4
+            right_start = right_idx * 4
+            # 각 프레임에 대해 좌우 교환
+            temp = transformed[:, left_start:left_start+4].copy()
+            transformed[:, left_start:left_start+4] = transformed[:, right_start:right_start+4]
+            transformed[:, right_start:right_start+4] = temp
+            
         return transformed
-
+    
     def swap_feedback_labels(self, feedback):
+        """왼손잡이용 피드백 라벨 변환"""
         swap_map = {
             'right_shoulder': 'left_shoulder',
             'right_elbow': 'left_elbow',
@@ -108,59 +170,11 @@ class BasketballShootingAnalyzer:
             feedback['detailed_analysis'] = new_detailed
 
         return feedback
-    
-    def analyze_shooting_mechanics(self, user_sequence):
-        features = []
-        for frame in user_sequence:
-            pose_features = self.extract_pose_features(frame)
-            if pose_features is not None:
-                features.append(pose_features)
-
-        if not features:
-            return None
-
-        features = np.array(features)
-
-        # 왼손잡이일 경우 데이터를 오른손잡이 기준으로 변환
-        if self.handedness == 'left':
-            features = self.transform_to_right_handed(features)
-
-        # 모델 입력을 위한 33 프레임 132차원 벡터로 변환
-        # features shape: (num_frames, 4)
-        required_frames = 33
-        current_frames = features.shape[0]
-
-        # 프레임 수가 33 미만이면 패딩
-        if current_frames < required_frames:
-            pad = np.zeros((required_frames - current_frames, features.shape[1]))
-            features = np.vstack([features, pad])
-        
-        # 처음 33 프레임 선택
-        features = features[:required_frames]
-        
-        # 33개의 4차원 벡터를 132차원 벡터로 평탄화
-        ffeatures = features.flatten()  # shape: (132,)
-
-        with torch.no_grad():
-    # features shape 확인 (33, 132)이어야 함)
-            assert features.shape == (33, 132), f"Unexpected features shape: {features.shape}"
-
-            # 배치 차원을 추가하여 (1, 33, 132)로 변환
-            user_tensor = torch.FloatTensor(features).unsqueeze(0).to(device)  # shape: (1, 33, 132)
-            reconstructed = self.model(user_tensor)  # 모델 입력
-            differences = torch.abs(reconstructed - user_tensor)
-            differences = differences.cpu().numpy()
-
-        feedback = self.generate_feedback(differences[0])
-
-        if self.handedness == 'left' and feedback is not None:
-            feedback = self.swap_feedback_labels(feedback)
-
-        return feedback
 
     def generate_feedback(self, differences):
+        """차이점 분석을 바탕으로 피드백 생성"""
         joint_differences = {}
-
+        
         key_joints = {
             'right_shoulder': 12,
             'right_elbow': 14,
@@ -175,19 +189,19 @@ class BasketballShootingAnalyzer:
             'left_knee': 25,
             'left_ankle': 27
         }
-
+        
         for joint_name, idx in key_joints.items():
             start_idx = idx * 4
             joint_diff = np.mean(differences[start_idx:start_idx+3])
             joint_differences[joint_name] = joint_diff
-
+        
         feedback = {
             'major_differences': [],
             'detailed_analysis': {}
         }
-
+        
         threshold = np.mean(list(joint_differences.values())) + np.std(list(joint_differences.values()))
-
+        
         for joint, diff in joint_differences.items():
             if diff > threshold:
                 feedback['major_differences'].append(joint)
@@ -195,13 +209,14 @@ class BasketballShootingAnalyzer:
                 'difference': float(diff),
                 'feedback': self._generate_joint_feedback(joint, diff, threshold)
             }
-
+        
         return feedback
 
     def _generate_joint_feedback(self, joint, difference, threshold):
+        """개별 관절에 대한 구체적 피드백 생성"""
         if difference <= threshold:
             return f"{joint.replace('_', ' ').title()}의 움직임이 프로 선수와 유사합니다."
-
+        
         feedback_templates = {
             'shoulder': "어깨의 높이와 회전이 프로 선수와 차이가 있습니다. 릴리즈 시 어깨 정렬에 주의해주세요.",
             'elbow': "팔꿈치 각도가 프로 선수와 다릅니다. 더 부드러운 팔꿈치 움직임이 필요합니다.",
@@ -210,54 +225,125 @@ class BasketballShootingAnalyzer:
             'knee': "무릎 굽힘이 프로 선수와 차이가 있습니다. 점프 시 무릎 사용을 개선해주세요.",
             'ankle': "발목의 움직임이 프로 선수와 다릅니다. 더 안정적인 지지가 필요합니다."
         }
-
+        
         for key, template in feedback_templates.items():
             if key in joint:
                 return template
-
+        
         return f"{joint.replace('_', ' ').title()}의 움직임에 개선이 필요합니다."
 
-def analyze_video(video_path, model_path='best_pretrain_model.pth'):
-    analyzer = BasketballShootingAnalyzer(model_path, handedness='right')
+    def analyze_shooting_mechanics(self, user_sequence, fps):
+        """사용자의 슈팅 동작을 분석하고 프로 선수와 비교"""
+        print("\nStarting shooting mechanics analysis...")
+        
+        # MediaPipe pose detector 초기화
+        pose_detector = mp.solutions.pose.Pose(
+            static_image_mode=False,
+            model_complexity=2,
+            enable_segmentation=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        
+        features = []
+        
+        print("Extracting pose features...")
+        for frame in user_sequence:
+            # RGB 변환
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # 포즈 추출
+            results = pose_detector.process(frame_rgb)
+            
+            if results.pose_landmarks:
+                # 랜드마크를 리스트로 변환
+                landmarks = []
+                for landmark in results.pose_landmarks.landmark:
+                    landmarks.extend([landmark.x, landmark.y, landmark.z, landmark.visibility])
+                features.append(landmarks)
+        
+        if not features:
+            print("No pose features detected")
+            return None
+        
+        print(f"Extracted features from {len(features)} frames")
+        features = np.array(features, dtype=np.float32)
 
+        if len(features) > self.frames_per_shot:
+            features = features[:self.frames_per_shot]
+        elif len(features) < self.frames_per_shot:
+            padding = np.tile(features[-1], (self.frames_per_shot - len(features), 1))
+            features = np.vstack((features, padding))
+
+        # 왼손잡이인 경우 데이터 변환
+        if self.handedness == 'left':
+            features = self.transform_to_right_handed(features)
+
+        
+        
+        print("Running model inference...")
+        with torch.no_grad():
+            user_tensor = torch.FloatTensor(features).unsqueeze(0).to(device)
+            reconstructed = self.model(user_tensor)
+            
+            print("Generating overlay video...")
+            overlay_and_save_video(user_sequence, reconstructed.cpu().numpy()[0], features, 
+                                   output_path="dataset1/output/kim_output.mp4", fps=fps)
+            
+            differences = torch.abs(reconstructed - user_tensor)
+            differences = differences.cpu().numpy()
+        
+        feedback = self.generate_feedback(differences[0])
+        similarity = 1 - np.mean(differences)
+        feedback['overall_similarity'] = float(similarity) * 100
+        
+        if self.handedness == 'left' and feedback is not None:
+            feedback = self.swap_feedback_labels(feedback)
+        
+        print("Analysis completed")
+        return feedback
+
+def analyze_video(video_path, model_path='best_pretrain_model_train_2.pth', handedness='right'):
+    """비디오 파일 분석"""
     if not os.path.exists(video_path):
-        logging.error(f"Video file not found: {video_path}")
+        print(f"Error: Video file does not exist: {video_path}")
         return None
-
+        
+    print(f"Opening video file: {video_path}")
+    analyzer = BasketballShootingAnalyzer(model_path, handedness=handedness)
+    
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        logging.error(f"Failed to open video: {video_path}")
+        print(f"Failed to open video: {video_path}")
+        print(f"OpenCV version: {cv2.__version__}")
+        print(f"Video file absolute path: {os.path.abspath(video_path)}")
         return None
-
+        
+    # 비디오 정보 출력
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)  # 원본 FPS 사용
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    print(f"Video info - Width: {width}, Height: {height}, FPS: {fps}, Total frames: {total_frames}")
+    
     frames = []
-    frame_count = 0
-
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         frames.append(frame)
-        frame_count += 1
-
+    
     cap.release()
-
-    logging.info(f"Processed {frame_count} frames from video")
-
-    if frame_count == 0:
-        logging.error("No frames were read from the video")
+    
+    if not frames:
+        print("No frames were read from the video")
         return None
-
-    feedback = analyzer.analyze_shooting_mechanics(frames)
-
-    if feedback is None:
-        logging.error("Failed to analyze shooting mechanics")
-    else:
-        logging.info("Successfully analyzed shooting mechanics")
-
+        
+    print(f"Successfully read {len(frames)} frames from video")
+    feedback = analyzer.analyze_shooting_mechanics(frames, fps=fps)
     return feedback
 
 def main():
-    video_path = "../dataset1/input/input_video.mp4"
+    video_path = "dataset1/input/input_video.mp4"
     feedback = analyze_video(video_path)
 
     if feedback is None:
@@ -265,7 +351,8 @@ def main():
         return
 
     print("\nAnalysis Results:")
-    print("Major differences found in:", feedback['major_differences'])
+    print(f"Overall similarity with pro player: {feedback['overall_similarity']:.2f}%")
+    print("\nMajor differences found in:", feedback['major_differences'])
     print("\nDetailed Analysis:")
     for joint, analysis in feedback['detailed_analysis'].items():
         print(f"\n{joint}:")
