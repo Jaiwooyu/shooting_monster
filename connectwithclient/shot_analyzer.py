@@ -418,7 +418,7 @@ class BasketballShootingAnalyzer:
                 # NaN인 경우, 피드백 생성에서 제외하거나 별도의 처리
                 feedback['detailed_analysis'][joint] = {
                     'difference': None,
-                    'feedback': f"{joint.replace('_', ' ').title()}의 움직임에 데이터가 충분하지 않아 분석할 수 없습니다."
+                    'feedback': f"{joint.replace('_', ' ').title()}의 움직임에 데이터가 충분하지 않아 분석할 수 없습니다"
                 }
                 continue  # 혹은 다른 처리 방식 선택 가능
             
@@ -434,10 +434,10 @@ class BasketballShootingAnalyzer:
     def _generate_joint_feedback(self, joint, difference, threshold):
         """개별 관절에 대한 구체적 피드백 생성"""
         if difference is None:
-            return f"{joint.replace('_', ' ').title()}의 움직임을 분석할 수 없습니다."
+            return f"{joint.replace('_', ' ').title()}의 움직임을 분석할 수 없습니다"
         
         if difference <= threshold:
-            return f"{joint.replace('_', ' ').title()}의 움직임이 프로 선수와 유사합니다."
+            return f"{joint.replace('_', ' ').title()}의 움직임이 프로 선수와 유사합니다"
         
         feedback_templates = {
             'shoulder': "어깨의 높이와 회전이 프로 선수와 차이가 있습니다. 릴리즈 시 어깨 정렬에 주의해주세요",
@@ -452,7 +452,7 @@ class BasketballShootingAnalyzer:
             if key in joint:
                 return template
         
-        return f"{joint.replace('_', ' ').title()}의 움직임에 개선이 필요합니다."
+        return f"{joint.replace('_', ' ').title()}의 움직임에 개선이 필요합니다"
     
     # --------------------------------------------------------------
     # --------------------------------------------------------------
