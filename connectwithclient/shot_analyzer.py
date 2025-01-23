@@ -272,7 +272,7 @@ class BasketballShootingAnalyzer:
             
             # 손목 유연도 계산 (손목 각도)
             # 이상적인 손목 각도 예시: 45도
-            ideal_wrist_angle = 60
+            ideal_wrist_angle = 140
             # 손목 각도 계산: 팔꿈치, 손목, 손가락 (손가락 데이터가 없으면 어깨, 팔꿈치, 손목으로 대체)
             if len(frame) > 20:
                 # MediaPipe 손가락 랜드마크가 추가된 경우
@@ -280,7 +280,6 @@ class BasketballShootingAnalyzer:
             else:
                 current_wrist_angle = calculate_angle(shoulder, elbow, wrist)
             wrist_flexion_diff = abs(ideal_wrist_angle - current_wrist_angle)
-            max_wrist_flex = max(max_wrist_flex, wrist_flexion_diff)
             
             # 어깨 정렬 검사
             left_shoulder = frame[11][:2]
@@ -306,7 +305,9 @@ class BasketballShootingAnalyzer:
                                 
                 # 손목 유연도 (이상적 차이가 적을수록 높은 점수)
                 # 역치를 낮추기 위해 스케일링 조정
-                wrist_flexion_score = max(0, 100 - (wrist_flexion_diff * 5))  # 예: 45도 차이 시 10점
+                current_wrist_angle = calculate_angle(shoulder, elbow, wrist)
+                print(f"current_wrist_angle {current_wrist_angle}", file=sys.stderr)
+                wrist_flexion_score = max(0, 100 - (wrist_flexion_diff))  # 예: 45도 차이 시 10점
                 scores['wrist_flexion'] = wrist_flexion_score
         
         # 타이밍 점수 (무릎과 팔꿈치의 최대 펴짐 시점 차이)
@@ -359,9 +360,9 @@ class BasketballShootingAnalyzer:
         
         # 기존 점수들의 가중치 적용 (전체 점수의 50%)
         weights = {
-            'elbow_extension': 0.15,
-            'wrist_flexion': 0.3,
-            'shoulder_alignment': 0.05,
+            'elbow_extension': 0.2,
+            'wrist_flexion': 0.2,
+            'shoulder_alignment': 0.1,
             'timing': 0.2,
             'arm_angle': 0.3
         }
@@ -418,7 +419,7 @@ class BasketballShootingAnalyzer:
                 # NaN인 경우, 피드백 생성에서 제외하거나 별도의 처리
                 feedback['detailed_analysis'][joint] = {
                     'difference': None,
-                    'feedback': f"{joint.replace('_', ' ').title()}의 움직임에 데이터가 충분하지 않아 분석할 수 없습니다"
+                    'feedback': f"{joint.replace('_', ' ').title()}의 움직임에 데이터가 충분하지 않아 분석할 수 없습니다."
                 }
                 continue  # 혹은 다른 처리 방식 선택 가능
             
