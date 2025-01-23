@@ -272,7 +272,7 @@ class BasketballShootingAnalyzer:
             
             # 손목 유연도 계산 (손목 각도)
             # 이상적인 손목 각도 예시: 45도
-            ideal_wrist_angle = 100
+            ideal_wrist_angle = 90
             # 손목 각도 계산: 팔꿈치, 손목, 손가락 (손가락 데이터가 없으면 어깨, 팔꿈치, 손목으로 대체)
             if len(frame) > 20:
                 # MediaPipe 손가락 랜드마크가 추가된 경우
@@ -306,7 +306,7 @@ class BasketballShootingAnalyzer:
                                 
                 # 손목 유연도 (이상적 차이가 적을수록 높은 점수)
                 # 역치를 낮추기 위해 스케일링 조정
-                wrist_flexion_score = max(0, 100 - (max_wrist_flex * 2))  # 예: 45도 차이 시 10점
+                wrist_flexion_score = max(0, 100 - (wrist_flexion_diff * 5))  # 예: 45도 차이 시 10점
                 scores['wrist_flexion'] = wrist_flexion_score
         
         # 타이밍 점수 (무릎과 팔꿈치의 최대 펴짐 시점 차이)
@@ -338,7 +338,7 @@ class BasketballShootingAnalyzer:
             'right_elbow': 14 * 4,     # 56
             # 'right_finger': 추가적인 인덱스 필요
         }
-        print(differences)
+        print(f"differences: {differences}", file=sys.stderr)
         differences = differences[0]
         specific_diffs = []
         for joint in specific_joints:
@@ -346,21 +346,22 @@ class BasketballShootingAnalyzer:
             if idx is not None and idx + 3 <= len(differences):
                 diff = differences[idx:idx+3].mean()
                 specific_diffs.append(diff)
-        print('specific_diffs {}', specific_diffs)
-        print(f"differences shape: {differences.shape}")  # 디버깅: 배열의 형태 출력
+        print(f"specific_diffs {specific_diffs}", file=sys.stderr)
+        print(f"differences shape: {differences.shape}", file=sys.stderr)  # 디버깅: 배열의 형태 출력
+
 
         if specific_diffs:
             specific_avg_diff = np.mean(specific_diffs)
-            print('specific_avg_diff {}', specific_avg_diff)
+            print(f"specific_avg_diff {specific_avg_diff}", file=sys.stderr)
             similarity_specific = max(0, 100 - (specific_avg_diff * 500))  # 스케일 조정
         else:
             similarity_specific = 100  # 특정 관절 데이터가 없을 경우 만점
         
         # 기존 점수들의 가중치 적용 (전체 점수의 50%)
         weights = {
-            'elbow_extension': 0.15,
-            'wrist_flexion': 0.3,
-            'shoulder_alignment': 0.05,
+            'elbow_extension': 0.2,
+            'wrist_flexion': 0.2,
+            'shoulder_alignment': 0.1,
             'timing': 0.2,
             'arm_angle': 0.3
         }
@@ -372,11 +373,11 @@ class BasketballShootingAnalyzer:
         # 최종 점수 계산
         final_score = (form_score * 0.5) + similarity_score
         
-        print('score {}', round(final_score, 2))
-        print('detailed_scores {}', {k: round(v, 2) for k, v in scores.items()} )
-        print('similarity_specific {}', round(similarity_specific, 2))
-        print('similarity_score {}', round(similarity_score, 2))
-        print('form_score {}', round(form_score, 2))
+        print(f"score {round(final_score, 2)}", file=sys.stderr)
+        print(f"detailed_scores { {k: round(v, 2) for k, v in scores.items()} }", file=sys.stderr)
+        print(f"similarity_specific {round(similarity_specific, 2)}", file=sys.stderr)
+        print(f"similarity_score {round(similarity_score, 2)}", file=sys.stderr)
+        print(f"form_score {round(form_score, 2)}", file=sys.stderr)
         return final_score
 
 
@@ -515,7 +516,7 @@ class BasketballShootingAnalyzer:
 
             differences = torch.abs(normalized_tensor - user_tensor)
             differences = differences.cpu().numpy()
-            self.analyze_shooting_form(features, differences)
+            final_score = self.analyze_shooting_form(features, differences)
             
             if self.handedness == 'left':
                 features = self.transform_to_right_handed(features)
@@ -524,8 +525,6 @@ class BasketballShootingAnalyzer:
             overlay_and_save_video(user_sequence, normalized_reconstructed, features, 
                                 output_path=output_video_path, fps=fps)
             
-            
-
         
         feedback = self.generate_feedback(differences[0])
         similarity = 1 - np.mean(differences)
@@ -539,7 +538,7 @@ class BasketballShootingAnalyzer:
         feedback['output_video_path'] = output_video_path
         
         return feedback
-    
+
 def detect_basketball_in_video(frames):
    """전체 프레임에서 농구공 검출 여부 확인"""
    ball_model = YOLO('best_2.pt')
@@ -628,7 +627,7 @@ def main():
                 "success": False,
                 "message": "No pose detected or video read failed."
             }
-            # print(json.dumps(result))
+            print(json.dumps(result))  # Uncommented
             sys.exit(0)
         else:
             # 정상 분석
@@ -646,7 +645,7 @@ def main():
             "success": False,
             "message": str(e)
         }
-        # print(json.dumps(result))
+        print(json.dumps(result))  # Uncommented
         sys.exit(1)
 
 if __name__ == "__main__":
