@@ -272,7 +272,7 @@ class BasketballShootingAnalyzer:
             
             # 손목 유연도 계산 (손목 각도)
             # 이상적인 손목 각도 예시: 45도
-            ideal_wrist_angle = 60
+            ideal_wrist_angle = 100
             # 손목 각도 계산: 팔꿈치, 손목, 손가락 (손가락 데이터가 없으면 어깨, 팔꿈치, 손목으로 대체)
             if len(frame) > 20:
                 # MediaPipe 손가락 랜드마크가 추가된 경우
@@ -280,7 +280,7 @@ class BasketballShootingAnalyzer:
             else:
                 current_wrist_angle = calculate_angle(shoulder, elbow, wrist)
             wrist_flexion_diff = abs(ideal_wrist_angle - current_wrist_angle)
-            max_wrist_flex = max(max_wrist_flex, wrist_flexion_diff)
+            max_wrist_flex = min(max_wrist_flex, wrist_flexion_diff)
             
             # 어깨 정렬 검사
             left_shoulder = frame[11][:2]
@@ -306,7 +306,7 @@ class BasketballShootingAnalyzer:
                                 
                 # 손목 유연도 (이상적 차이가 적을수록 높은 점수)
                 # 역치를 낮추기 위해 스케일링 조정
-                wrist_flexion_score = max(0, 100 - (wrist_flexion_diff * 5))  # 예: 45도 차이 시 10점
+                wrist_flexion_score = max(0, 100 - (max_wrist_flex * 2))  # 예: 45도 차이 시 10점
                 scores['wrist_flexion'] = wrist_flexion_score
         
         # 타이밍 점수 (무릎과 팔꿈치의 최대 펴짐 시점 차이)
@@ -348,7 +348,6 @@ class BasketballShootingAnalyzer:
                 specific_diffs.append(diff)
         print('specific_diffs {}', specific_diffs)
         print(f"differences shape: {differences.shape}")  # 디버깅: 배열의 형태 출력
-
 
         if specific_diffs:
             specific_avg_diff = np.mean(specific_diffs)

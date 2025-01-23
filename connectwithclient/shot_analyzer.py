@@ -213,6 +213,174 @@ class BasketballShootingAnalyzer:
     # 점수 계산 및 피드백 생성
     # --------------------------------------------------------------
 
+    def analyze_shooting_form(self, features, differences, normalized=None):
+        """슈팅 폼 분석 및 점수 책정"""
+        
+        def calculate_angle(p1, p2, p3):
+            """세 점 사이의 각도 계산"""
+            a = np.array(p1[:2])  # x,y만 사용
+            b = np.array(p2[:2])
+            c = np.array(p3[:2])
+            
+            ba = a - b
+            bc = c - b
+            
+            cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+            angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
+            
+            return np.degrees(angle)
+
+        scores = {
+            'elbow_extension': 0,      # 팔꿈치 펴짐
+            'wrist_flexion': 0,        # 손목 꺾임
+            'shoulder_alignment': 0,   # 어깨 정렬
+            'timing': 0,               # 무릎-팔꿈치 타이밍
+            'arm_angle': 0             # 팔 각도
+        }
+        
+        frame_count = len(features)
+        max_elbow_angle = 0
+        max_wrist_flex = 0
+        max_arm_angle = 0
+        release_frame = None
+        
+        # 릴리즈 포인트 찾기 (손목 높이가 최대인 프레임)
+        max_wrist_height = 0
+        for i in range(frame_count):
+            right_wrist = features[i][16*4:16*4+2]  # right_wrist의 x,y
+            if right_wrist[1] > max_wrist_height:
+                max_wrist_height = right_wrist[1]
+                release_frame = i
+        
+        if release_frame is None:
+            return None
+        
+        # 릴리즈 전후 10프레임 분석
+        start_frame = max(0, release_frame - 10)
+        end_frame = min(frame_count, release_frame + 10)
+        
+        for i in range(0, frame_count):
+            frame = features[i].reshape(-1, 4)
+            
+            # 팔꿈치 각도 계산
+            shoulder = frame[12][:2]  # right_shoulder
+            elbow = frame[14][:2]     # right_elbow
+            wrist = frame[16][:2]     # right_wrist
+            
+            elbow_angle = calculate_angle(shoulder, elbow, wrist)
+            max_elbow_angle = max(max_elbow_angle, elbow_angle)
+            
+            # 손목 유연도 계산 (손목 각도)
+            # 이상적인 손목 각도 예시: 45도
+            ideal_wrist_angle = 60
+            # 손목 각도 계산: 팔꿈치, 손목, 손가락 (손가락 데이터가 없으면 어깨, 팔꿈치, 손목으로 대체)
+            if len(frame) > 20:
+                # MediaPipe 손가락 랜드마크가 추가된 경우
+                current_wrist_angle = calculate_angle(frame[14][:2], frame[16][:2], frame[20][:2])
+            else:
+                current_wrist_angle = calculate_angle(shoulder, elbow, wrist)
+            wrist_flexion_diff = abs(ideal_wrist_angle - current_wrist_angle)
+            max_wrist_flex = max(max_wrist_flex, wrist_flexion_diff)
+            
+            # 어깨 정렬 검사
+            left_shoulder = frame[11][:2]
+            right_shoulder = frame[12][:2]
+            shoulder_diff = abs(left_shoulder[1] - right_shoulder[1])  # y축 차이
+            
+            # 무릎 펴짐 계산
+            right_hip = frame[24][:2]
+            right_knee = frame[26][:2]
+            right_ankle = frame[28][:2]
+            knee_angle = calculate_angle(right_hip, right_knee, right_ankle)
+
+            arm_angle = calculate_angle(elbow, right_shoulder, right_hip)
+            max_arm_angle = max(max_arm_angle, arm_angle)
+            
+            # 점수 계산
+            if i == release_frame:
+                # 팔꿈치 펴짐 (170도 이상이면 만점으로 상향)
+                scores['elbow_extension'] = min(100, (max_elbow_angle / 175) * 100)
+                
+                # 어깨 정렬 (차이가 적을수록 높은 점수, 페널티 상향)
+                scores['shoulder_alignment'] = max(0, 100 - (shoulder_diff * 1000))  # 기존 500에서 700으로 증가
+                                
+                # 손목 유연도 (이상적 차이가 적을수록 높은 점수)
+                # 역치를 낮추기 위해 스케일링 조정
+                wrist_flexion_score = max(0, 100 - (wrist_flexion_diff * 5))  # 예: 45도 차이 시 10점
+                scores['wrist_flexion'] = wrist_flexion_score
+        
+        # 타이밍 점수 (무릎과 팔꿈치의 최대 펴짐 시점 차이)
+        knee_max_frame = start_frame + np.argmax([calculate_angle(features[i].reshape(-1,4)[24][:2],
+                                                                features[i].reshape(-1,4)[26][:2],
+                                                                features[i].reshape(-1,4)[28][:2])
+                                                for i in range(start_frame, end_frame)])
+        elbow_max_frame = start_frame + np.argmax([calculate_angle(features[i].reshape(-1,4)[12][:2],
+                                                                    features[i].reshape(-1,4)[14][:2],
+                                                                    features[i].reshape(-1,4)[16][:2])
+                                                    for i in range(start_frame, end_frame)])
+        timing_diff = abs(knee_max_frame - elbow_max_frame)
+        scores['timing'] = max(0, 100 - (timing_diff * 15))
+        scores['arm_angle'] = max(0, 100 - abs(140 - max_arm_angle) * 2)
+        
+        # differences 데이터 활용하여 특정 관절의 움직임 유사도 반영
+        # 양쪽 어깨, 오른팔 손목의 차이 데이터 추출
+        specific_joints = [
+            'left_shoulder', 'right_shoulder',
+            'right_wrist',
+            'left_elbow', 'right_elbow',
+            # 'right_finger' 추가 가능
+        ]
+        specific_indices = {
+            'left_shoulder': 11 * 4,
+            'right_shoulder': 12 * 4,
+            'right_wrist': 16 * 4,
+            'left_elbow': 13 * 4,      # 52
+            'right_elbow': 14 * 4,     # 56
+            # 'right_finger': 추가적인 인덱스 필요
+        }
+        print(f"differences: {differences}", file=sys.stderr)
+        differences = differences[0]
+        specific_diffs = []
+        for joint in specific_joints:
+            idx = specific_indices.get(joint, None)
+            if idx is not None and idx + 3 <= len(differences):
+                diff = differences[idx:idx+3].mean()
+                specific_diffs.append(diff)
+        print(f"specific_diffs {specific_diffs}", file=sys.stderr)
+        print(f"differences shape: {differences.shape}", file=sys.stderr)  # 디버깅: 배열의 형태 출력
+
+
+        if specific_diffs:
+            specific_avg_diff = np.mean(specific_diffs)
+            print(f"specific_avg_diff {specific_avg_diff}", file=sys.stderr)
+            similarity_specific = max(0, 100 - (specific_avg_diff * 500))  # 스케일 조정
+        else:
+            similarity_specific = 100  # 특정 관절 데이터가 없을 경우 만점
+        
+        # 기존 점수들의 가중치 적용 (전체 점수의 50%)
+        weights = {
+            'elbow_extension': 0.15,
+            'wrist_flexion': 0.3,
+            'shoulder_alignment': 0.05,
+            'timing': 0.2,
+            'arm_angle': 0.3
+        }
+        form_score = sum(scores[k] * weights[k] for k in weights.keys())
+        
+        # 특정 관절 유사도 점수 (전체 점수의 50%)
+        similarity_score = similarity_specific * 0.5  # 50% 가중치
+        
+        # 최종 점수 계산
+        final_score = (form_score * 0.5) + similarity_score
+        
+        print(f"score {round(final_score, 2)}", file=sys.stderr)
+        print(f"detailed_scores { {k: round(v, 2) for k, v in scores.items()} }", file=sys.stderr)
+        print(f"similarity_specific {round(similarity_specific, 2)}", file=sys.stderr)
+        print(f"similarity_score {round(similarity_score, 2)}", file=sys.stderr)
+        print(f"form_score {round(form_score, 2)}", file=sys.stderr)
+        return final_score
+
+
     def generate_feedback(self, differences):
         """차이점 분석을 바탕으로 피드백 생성"""
         joint_differences = {}
@@ -287,6 +455,8 @@ class BasketballShootingAnalyzer:
         return f"{joint.replace('_', ' ').title()}의 움직임에 개선이 필요합니다."
     
     # --------------------------------------------------------------
+    # --------------------------------------------------------------
+
 
     def analyze_shooting_mechanics(self, user_sequence, fps, output_video_path):
         """사용자의 슈팅 동작을 분석하고 프로 선수와 비교"""
@@ -342,7 +512,12 @@ class BasketballShootingAnalyzer:
             reconstructed_np = reconstructed.cpu().numpy()[0]
 
             normalized_reconstructed = normalize_reconstructed_landmarks(features, reconstructed_np)
+            normalized_tensor = torch.FloatTensor(normalized_reconstructed).unsqueeze(0).to(device)
 
+            differences = torch.abs(normalized_tensor - user_tensor)
+            differences = differences.cpu().numpy()
+            final_score = self.analyze_shooting_form(features, differences)
+            
             if self.handedness == 'left':
                 features = self.transform_to_right_handed(features)
                 normalized_reconstructed = self.transform_to_right_handed(normalized_reconstructed)
@@ -350,8 +525,6 @@ class BasketballShootingAnalyzer:
             overlay_and_save_video(user_sequence, normalized_reconstructed, features, 
                                 output_path=output_video_path, fps=fps)
             
-            differences = torch.abs(reconstructed - user_tensor)
-            differences = differences.cpu().numpy()
         
         feedback = self.generate_feedback(differences[0])
         similarity = 1 - np.mean(differences)
@@ -365,7 +538,7 @@ class BasketballShootingAnalyzer:
         feedback['output_video_path'] = output_video_path
         
         return feedback
-    
+
 def detect_basketball_in_video(frames):
    """전체 프레임에서 농구공 검출 여부 확인"""
    ball_model = YOLO('best_2.pt')
@@ -454,7 +627,7 @@ def main():
                 "success": False,
                 "message": "No pose detected or video read failed."
             }
-            print(json.dumps(result))
+            print(json.dumps(result))  # Uncommented
             sys.exit(0)
         else:
             # 정상 분석
@@ -472,7 +645,7 @@ def main():
             "success": False,
             "message": str(e)
         }
-        print(json.dumps(result))
+        print(json.dumps(result))  # Uncommented
         sys.exit(1)
 
 if __name__ == "__main__":
